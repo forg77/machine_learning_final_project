@@ -121,7 +121,7 @@ optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-3)
 
 dataset = TensorDataset(train_X_tensor, train_y_tensor)
 #*****
-batch_size = 256
+batch_size = 64
 #******
 dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 valset = TensorDataset(val_X_tensor, val_y_tensor)
@@ -144,7 +144,7 @@ for epoch in range(num_epochs):
       # print(hc1[0].shape)
       loss = 0.0
       loss += criterion(output, batch_target[:,0,:])
-      outputs = output.unsqueeze(1)
+      outputs = torch.concat([batch_seq[:,1:,],output.unsqueeze(1)],dim=1)
 #       print("output shape",outputs.shape)
 #       print("target shape",batch_target.shape)
 #       output shape torch.Size([16, 1, 7])
@@ -155,7 +155,7 @@ for epoch in range(num_epochs):
         outputs = outputs.unsqueeze(1)
         # hc = (torch.squeeze(hc[0]),torch.squeeze(hc[1]))
         loss += criterion(outputs[:,-1,:], batch_target[:,i,:])
-      
+        outputs = torch.concat([batch_seq[:,i+1:,],outputs],dim=1)
       optimizer.zero_grad()
       loss.backward()
       torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.7)
@@ -169,12 +169,14 @@ for epoch in range(num_epochs):
             val_outputs, hc = model(val_batch_data,'0')
             val_outputs = val_outputs.unsqueeze(1)
             val_loss += criterion(val_outputs[:,-1,:], val_batch_labels[:,0,:])
-            outputs = val_outputs
+            outputs = torch.concat([val_batch_data[:,1:,],outputs.unsqueeze(1)],dim=1)
+
             for i in range(1,STOP_SIGN):
               outputs, hc = model(outputs, hc)
               outputs = outputs.unsqueeze(1)
               # hc = (torch.squeeze(hc[0]),torch.squeeze(hc[1]))
               val_loss += criterion(outputs[:,-1,:], val_batch_labels[:,i,:])
+              outputs = torch.concat([val_batch_data[:,i+1:,],outputs],dim=1)
             val_loss /= 336
             val_total_loss += val_loss.item()
     average_val_loss = val_total_loss / len(val_loader)
