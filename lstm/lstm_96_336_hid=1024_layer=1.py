@@ -86,7 +86,7 @@ num_layers = 1
 output_size = len(features)
 
 model = MultiVarLSTM(input_size, hidden_size, num_layers, output_size)
-model = model.to(torch.device("cuda:4" if torch.cuda.is_available() else "cpu"))
+model = model.to(torch.device("cuda:0" if torch.cuda.is_available() else "cpu"))
 
 
 # # 转换为PyTorch的张量
@@ -94,8 +94,8 @@ train_X, train_y = seq_tar_spliter(train_set)
 # print(train_X.shape,train_y.shape)
 con_zeros1 = np.zeros_like(train_X)
 # train_X = np.concatenate((train_X,con_zeros1),1)
-train_X_tensor = Variable(torch.Tensor(train_X)).to("cuda:4")
-train_y_tensor = Variable(torch.Tensor(train_y)).to("cuda:4")
+train_X_tensor = Variable(torch.Tensor(train_X)).to("cuda:0")
+train_y_tensor = Variable(torch.Tensor(train_y)).to("cuda:0")
 
 print(train_X.shape)
 
@@ -103,15 +103,15 @@ print(train_X.shape)
 val_X, val_y = seq_tar_spliter(val_set)
 con_zeros1 = np.zeros_like(val_X)
 # val_X = np.concatenate((val_X,con_zeros1),1)
-val_X_tensor = Variable(torch.Tensor(val_X)).to("cuda:4")
-val_y_tensor = Variable(torch.Tensor(val_y)).to("cuda:4")
+val_X_tensor = Variable(torch.Tensor(val_X)).to("cuda:0")
+val_y_tensor = Variable(torch.Tensor(val_y)).to("cuda:0")
 print(val_X.shape)
 
 test_X, test_y = seq_tar_spliter(test_set)
 con_zeros1 = np.zeros_like(test_X)
 # test_X = np.concatenate((test_X,con_zeros1),1)
-test_X_tensor = Variable(torch.Tensor(test_X)).to("cuda:4")
-test_y_tensor = Variable(torch.Tensor(test_y)).to("cuda:4")
+test_X_tensor = Variable(torch.Tensor(test_X)).to("cuda:0")
+test_y_tensor = Variable(torch.Tensor(test_y)).to("cuda:0")
 print(test_X.shape)
 # # 定义损失函数和优化器
 criterion = nn.MSELoss()
@@ -121,7 +121,7 @@ optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-3)
 
 dataset = TensorDataset(train_X_tensor, train_y_tensor)
 #*****
-batch_size = 64
+batch_size = 8
 #******
 dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 valset = TensorDataset(val_X_tensor, val_y_tensor)
@@ -136,7 +136,7 @@ for epoch in range(num_epochs):
     t1 = time.time()
     model.train()
     for batch_seq, batch_target in dataloader:
-      batch_seq, batch_target = batch_seq.to("cuda:4"), batch_target.to("cuda:4")
+      batch_seq, batch_target = batch_seq.to("cuda:0"), batch_target.to("cuda:0")
       output,hc = model(batch_seq,'0') #这是第97个值，第一个预测值
       # output = output[:,-1,:]
       # print("output",output.shape)
@@ -144,7 +144,9 @@ for epoch in range(num_epochs):
       # print(hc1[0].shape)
       loss = 0.0
       loss += criterion(output, batch_target[:,0,:])
+      pred = output.unsqueeze(1)
       outputs = torch.concat([batch_seq[:,1:,],output.unsqueeze(1)],dim=1)
+      
 #       print("output shape",outputs.shape)
 #       print("target shape",batch_target.shape)
 #       output shape torch.Size([16, 1, 7])
@@ -155,7 +157,9 @@ for epoch in range(num_epochs):
         outputs = outputs.unsqueeze(1)
         # hc = (torch.squeeze(hc[0]),torch.squeeze(hc[1]))
         loss += criterion(outputs[:,-1,:], batch_target[:,i,:])
-        outputs = torch.concat([batch_seq[:,i+1:,],outputs],dim=1)
+        pred = torch.concat([pred,outputs[:,-1:,]],dim=1)
+        outputs = torch.concat([batch_seq[:,i+1:,],pred],dim=1)
+
       optimizer.zero_grad()
       loss.backward()
       torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.7)
@@ -165,18 +169,22 @@ for epoch in range(num_epochs):
     val_total_loss = 0.0
     with torch.no_grad():
         for val_batch_data, val_batch_labels in val_loader:
-            val_batch_data, val_batch_labels = val_batch_data.to("cuda:4"), val_batch_labels.to("cuda:4")
+            val_batch_data, val_batch_labels = val_batch_data.to("cuda:0"), val_batch_labels.to("cuda:0")
             val_outputs, hc = model(val_batch_data,'0')
             val_outputs = val_outputs.unsqueeze(1)
             val_loss += criterion(val_outputs[:,-1,:], val_batch_labels[:,0,:])
-            outputs = torch.concat([val_batch_data[:,1:,],outputs.unsqueeze(1)],dim=1)
+            pred = val_outputs.unsqueeze(1)
+            outputs = torch.concat([val_batch_data[:,1,:],val_outputs.unsqueeze(1)],dim=1)
 
             for i in range(1,STOP_SIGN):
               outputs, hc = model(outputs, hc)
               outputs = outputs.unsqueeze(1)
+              pred = torch.concat([pred,outputs[:,-1:,]],dim=1)
+              
               # hc = (torch.squeeze(hc[0]),torch.squeeze(hc[1]))
               val_loss += criterion(outputs[:,-1,:], val_batch_labels[:,i,:])
-              outputs = torch.concat([val_batch_data[:,i+1:,],outputs],dim=1)
+              outputs = torch.concat([val_batch_data[:,i+1:,],pred],dim=1)
+
             val_loss /= 336
             val_total_loss += val_loss.item()
     average_val_loss = val_total_loss / len(val_loader)
